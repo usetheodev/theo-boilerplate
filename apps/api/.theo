@@ -1,0 +1,12 @@
+{
+  "framework": "nest",
+  "build": {
+    "command": "turbo run build --filter=api",
+    "outputDir": "dist"
+  },
+  "runtime": {
+    "type": "server",
+    "port": 3000,
+    "serve": "node dist/main.js"
+  }
+}

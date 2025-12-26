@@ -1,0 +1,49 @@
+app:
+  id: theo-boilerplate
+  name: THEO Boilerplate (Vite + NestJS)
+  runtime: nodejs
+  stack: vite+nestjs
+
+  # Build with Turborepo (turbo.build)
+  buildTool: turbo
+
+projects:
+  web:
+    type: frontend
+    framework: vite
+    path: apps/web
+    buildCommand: turbo run build --filter=web
+    outputDir: apps/web/dist
+
+  api:
+    type: backend
+    framework: nestjs
+    path: apps/api
+    buildCommand: turbo run build --filter=api
+    outputDir: apps/api/dist
+    entrypoint: dist/main.js
+    startCommand: node dist/main.js
+
+environments:
+  development:
+    replicas: 1
+    resources:
+      cpu: "250m"
+      memory: "256Mi"
+
+  production:
+    replicas: 2
+    resources:
+      cpu: "500m"
+      memory: "512Mi"
+
+exclude:
+  - node_modules
+  - dist
+  - .git
+  - .github
+  - .turbo
+  - test
+  - coverage
+  - "*.log"
+  - ".env*"

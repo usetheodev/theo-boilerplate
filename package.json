@@ -1,0 +1,47 @@
+{
+  "name": "theo-boilerplate",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Professional full-stack TypeScript boilerplate with Next.js 14 + NestJS 10",
+  "packageManager": "pnpm@8.15.0",
+  "author": "Theo Platform Team",
+  "license": "MIT",
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "start": "turbo run start",
+    "lint": "turbo run lint",
+    "lint:fix": "turbo run lint:fix",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\"",
+    "typecheck": "turbo run type-check",
+    "test": "turbo run test",
+    "test:watch": "turbo run test:watch",
+    "test:e2e": "turbo run test:e2e",
+    "clean": "turbo run clean && rm -rf node_modules .turbo",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "docker:logs": "docker-compose logs -f",
+    "docker:reset": "docker-compose down -v && docker-compose up -d",
+    "db:migrate": "turbo run prisma:migrate --filter=api",
+    "db:studio": "turbo run prisma:studio --filter=api",
+    "db:reset": "pnpm --filter api prisma migrate reset",
+    "test:db:up": "docker-compose -f docker-compose.test.yml up -d",
+    "test:db:down": "docker-compose -f docker-compose.test.yml down",
+    "test:db:migrate": "DATABASE_URL=$TEST_DATABASE_URL pnpm --filter api prisma migrate deploy",
+    "test:db:seed": "DATABASE_URL=$TEST_DATABASE_URL pnpm --filter api prisma db seed",
+    "prepare": "husky install"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^18.4.3",
+    "@commitlint/config-conventional": "^18.4.3",
+    "husky": "^8.0.3",
+    "lint-staged": "^15.2.0",
+    "prettier": "^3.1.1",
+    "turbo": "^2.3.3"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=8.15.0"
+  }
+}

@@ -1,0 +1,26 @@
+version: '3.9'
+
+services:
+  postgres-test:
+    image: postgres:16-alpine
+    container_name: theo-postgres-test
+    environment:
+      POSTGRES_DB: theo_test
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+    ports:
+      - "5433:5432"
+    # tmpfs for faster tests (RAM disk)
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - theo-test-network
+
+networks:
+  theo-test-network:
+    driver: bridge

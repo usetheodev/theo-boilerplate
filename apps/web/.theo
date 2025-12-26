@@ -1,0 +1,12 @@
+{
+  "framework": "vite",
+  "build": {
+    "command": "turbo run build --filter=web",
+    "outputDir": "dist"
+  },
+  "runtime": {
+    "type": "static",
+    "port": 3000,
+    "serve": "npx serve -s dist -l 3000"
+  }
+}

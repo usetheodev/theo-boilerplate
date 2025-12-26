@@ -1,0 +1,133 @@
+// Prisma Schema for Theo Boilerplate
+// PostgreSQL database with full authentication support
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ===========================
+// User Model
+// ===========================
+
+enum UserRole {
+  USER
+  ADMIN
+  MODERATOR
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  password      String?   // Null for OAuth-only users
+  name          String?
+  avatar        String?
+  role          UserRole  @default(USER)
+  emailVerified Boolean   @default(false)
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  oauthProviders OAuthProvider[]
+  refreshTokens  RefreshToken[]
+  emailTokens    EmailToken[]
+
+  @@map("users")
+}
+
+// ===========================
+// OAuth Provider Model
+// ===========================
+
+enum OAuthProviderType {
+  GOOGLE
+  GITHUB
+  FACEBOOK
+  TWITTER
+}
+
+model OAuthProvider {
+  id         String             @id @default(cuid())
+  provider   OAuthProviderType
+  providerId String             // ID from OAuth provider
+
+  // OAuth tokens
+  accessToken  String?
+  refreshToken String?
+
+  // User relation
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([provider, providerId])
+  @@map("oauth_providers")
+}
+
+// ===========================
+// Refresh Token Model
+// ===========================
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  expiresAt DateTime
+
+  // User relation
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Timestamps
+  createdAt DateTime @default(now())
+
+  @@map("refresh_tokens")
+}
+
+// ===========================
+// Email Token Model (verification + password reset)
+// ===========================
+
+enum EmailTokenType {
+  EMAIL_VERIFICATION
+  PASSWORD_RESET
+}
+
+model EmailToken {
+  id        String         @id @default(cuid())
+  token     String         @unique
+  type      EmailTokenType
+  expiresAt DateTime
+
+  // User relation
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Timestamps
+  createdAt DateTime @default(now())
+
+  @@map("email_tokens")
+}
+
+// ===========================
+// Indexes for Performance
+// ===========================
+
+// Indexes on User
+// @@index([email]) - Already unique, no need for additional index
+
+// Indexes on RefreshToken
+// @@index([token]) - Already unique
+// @@index([userId, expiresAt])
+
+// Indexes on EmailToken
+// @@index([token]) - Already unique
+// @@index([userId, type, expiresAt])

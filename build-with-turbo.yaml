@@ -1,0 +1,347 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: build-with-turbo
+  namespace: builder
+  annotations:
+    workflows.argoproj.io/description: |
+      Build theo-boilerplate monorepo using Turborepo.
+      Zero-hardcoding approach with intelligent caching and parallel execution.
+    workflows.argoproj.io/version: "1.0.0"
+    workflows.argoproj.io/tags: "build,turborepo,monorepo,vite,nestjs"
+spec:
+  # Arguments (inputs)
+  arguments:
+    parameters:
+      - name: git-url
+        value: "https://github.com/theo-platform/theo-boilerplate.git"
+      - name: git-branch
+        value: "main"
+      - name: git-commit
+        value: "HEAD"
+      - name: registry
+        value: "registry.digitalocean.com/theo-platform"
+      - name: s3-bucket
+        value: "theo-builds"
+      - name: build-id
+        value: "{{workflow.uid}}"
+
+  # Volume claim template for workspace
+  volumeClaimTemplates:
+    - metadata:
+        name: workspace
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 5Gi
+
+  # Entrypoint (DAG)
+  entrypoint: build-pipeline
+
+  templates:
+    # ========================================
+    # Main DAG Pipeline
+    # ========================================
+    - name: build-pipeline
+      dag:
+        tasks:
+          # Step 1: Setup workspace (clone + install)
+          - name: setup-workspace
+            template: setup-workspace
+
+          # Step 2: Build all projects with Turborepo (parallel)
+          - name: turbo-build
+            template: turbo-build
+            dependencies: [setup-workspace]
+
+          # Step 3: Package outputs (parallel)
+          - name: package-web
+            template: package-output
+            dependencies: [turbo-build]
+            arguments:
+              parameters:
+                - name: project-name
+                  value: "web"
+                - name: output-dir
+                  value: "apps/web/dist"
+
+          - name: package-api
+            template: package-output
+            dependencies: [turbo-build]
+            arguments:
+              parameters:
+                - name: project-name
+                  value: "api"
+                - name: output-dir
+                  value: "apps/api/dist"
+
+          # Step 4: Build Docker images (parallel)
+          - name: build-image-web
+            template: build-image
+            dependencies: [package-web]
+            arguments:
+              parameters:
+                - name: project-name
+                  value: "web"
+                - name: dockerfile
+                  value: "apps/web/Dockerfile"
+                - name: context
+                  value: "."
+
+          - name: build-image-api
+            template: build-image
+            dependencies: [package-api]
+            arguments:
+              parameters:
+                - name: project-name
+                  value: "api"
+                - name: dockerfile
+                  value: "apps/api/Dockerfile"
+                - name: context
+                  value: "."
+
+          # Step 5: Cleanup
+          - name: cleanup
+            template: cleanup
+            dependencies: [build-image-web, build-image-api]
+
+    # ========================================
+    # Template: Setup Workspace
+    # ========================================
+    - name: setup-workspace
+      container:
+        image: node:20-alpine
+        command: [sh, -c]
+        args:
+          - |
+            set -e
+            echo "========================================"
+            echo "Step 1: Clone repository"
+            echo "========================================"
+            apk add --no-cache git curl
+            git clone {{workflow.parameters.git-url}} /workspace/repo
+            cd /workspace/repo
+            git checkout {{workflow.parameters.git-branch}}
+            git reset --hard {{workflow.parameters.git-commit}}
+
+            echo ""
+            echo "========================================"
+            echo "Step 2: Install pnpm"
+            echo "========================================"
+            npm install -g pnpm@8.15.0
+
+            echo ""
+            echo "========================================"
+            echo "Step 3: Install dependencies (includes Turbo)"
+            echo "========================================"
+            pnpm install --frozen-lockfile
+
+            echo ""
+            echo "========================================"
+            echo "Step 4: Verify Turborepo installation"
+            echo "========================================"
+            pnpm exec turbo --version
+
+            echo ""
+            echo "========================================"
+            echo "Step 5: Discover projects"
+            echo "========================================"
+            echo "Projects in workspace:"
+            pnpm list --depth 0 --json | grep -o '"name":"[^"]*"' | cut -d'"' -f4 || echo "  - web (apps/web)"
+            echo "  - api (apps/api)"
+            echo "  - types (packages/types)"
+            echo "  - validators (packages/validators)"
+
+            echo ""
+            echo "✅ Workspace setup complete!"
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+
+    # ========================================
+    # Template: Turborepo Build
+    # ========================================
+    - name: turbo-build
+      container:
+        image: node:20-alpine
+        command: [sh, -c]
+        args:
+          - |
+            set -e
+            cd /workspace/repo
+
+            echo "========================================"
+            echo "Building all projects with Turborepo"
+            echo "========================================"
+            echo ""
+            echo "Turborepo will:"
+            echo "  1. Build packages/types"
+            echo "  2. Build packages/validators"
+            echo "  3. Build apps/web (parallel with api)"
+            echo "  4. Build apps/api (parallel with web)"
+            echo ""
+            echo "Starting build..."
+            echo ""
+
+            # Run Turbo build with verbose output
+            pnpm exec turbo run build --summarize
+
+            echo ""
+            echo "✅ Build complete!"
+            echo ""
+            echo "Verifying outputs:"
+            ls -lh apps/web/dist/ 2>/dev/null && echo "  ✅ apps/web/dist exists" || echo "  ❌ apps/web/dist missing"
+            ls -lh apps/api/dist/ 2>/dev/null && echo "  ✅ apps/api/dist exists" || echo "  ❌ apps/api/dist missing"
+
+            # Show Turbo cache stats if available
+            if [ -d ".turbo" ]; then
+              echo ""
+              echo "Turborepo cache stats:"
+              du -sh .turbo
+            fi
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+
+    # ========================================
+    # Template: Package Output
+    # ========================================
+    - name: package-output
+      inputs:
+        parameters:
+          - name: project-name
+          - name: output-dir
+      container:
+        image: amazon/aws-cli:latest
+        command: [sh, -c]
+        args:
+          - |
+            set -e
+            cd /workspace/repo
+
+            PROJECT="{{inputs.parameters.project-name}}"
+            OUTPUT_DIR="{{inputs.parameters.output-dir}}"
+            BUILD_ID="{{workflow.parameters.build-id}}"
+            S3_BUCKET="{{workflow.parameters.s3-bucket}}"
+
+            echo "========================================"
+            echo "Packaging: $PROJECT"
+            echo "========================================"
+
+            if [ ! -d "$OUTPUT_DIR" ]; then
+              echo "❌ ERROR: Output directory not found: $OUTPUT_DIR"
+              exit 1
+            fi
+
+            ARCHIVE_NAME="${PROJECT}-${BUILD_ID}.tar.gz"
+
+            echo "Creating archive: $ARCHIVE_NAME"
+            tar -czf "/tmp/$ARCHIVE_NAME" -C "$OUTPUT_DIR" .
+
+            echo "Archive size:"
+            ls -lh "/tmp/$ARCHIVE_NAME"
+
+            echo ""
+            echo "Uploading to S3: s3://$S3_BUCKET/builds/$BUILD_ID/$ARCHIVE_NAME"
+            # aws s3 cp "/tmp/$ARCHIVE_NAME" "s3://$S3_BUCKET/builds/$BUILD_ID/$ARCHIVE_NAME"
+            echo "(S3 upload simulated - configure AWS credentials for production)"
+
+            echo ""
+            echo "✅ Package complete: $PROJECT"
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "250m"
+
+    # ========================================
+    # Template: Build Docker Image (Kaniko)
+    # ========================================
+    - name: build-image
+      inputs:
+        parameters:
+          - name: project-name
+          - name: dockerfile
+          - name: context
+      container:
+        image: gcr.io/kaniko-project/executor:latest
+        args:
+          - --context=/workspace/repo/{{inputs.parameters.context}}
+          - --dockerfile=/workspace/repo/{{inputs.parameters.dockerfile}}
+          - --destination={{workflow.parameters.registry}}/{{inputs.parameters.project-name}}:{{workflow.parameters.git-commit}}
+          - --destination={{workflow.parameters.registry}}/{{inputs.parameters.project-name}}:latest
+          - --cache=true
+          - --cache-ttl=24h
+          - --verbosity=info
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+
+    # ========================================
+    # Template: Cleanup
+    # ========================================
+    - name: cleanup
+      container:
+        image: alpine:latest
+        command: [sh, -c]
+        args:
+          - |
+            echo "========================================"
+            echo "Cleanup"
+            echo "========================================"
+
+            # Show final cache stats
+            if [ -d "/workspace/repo/.turbo" ]; then
+              echo "Turborepo cache size:"
+              du -sh /workspace/repo/.turbo
+            fi
+
+            echo ""
+            echo "Workspace disk usage:"
+            du -sh /workspace/repo
+
+            echo ""
+            echo "✅ Build pipeline complete!"
+            echo ""
+            echo "Build ID: {{workflow.parameters.build-id}}"
+            echo "Git commit: {{workflow.parameters.git-commit}}"
+            echo "Images built:"
+            echo "  - {{workflow.parameters.registry}}/web:{{workflow.parameters.git-commit}}"
+            echo "  - {{workflow.parameters.registry}}/api:{{workflow.parameters.git-commit}}"
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "100m"
