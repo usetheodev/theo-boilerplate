@@ -1,23 +1,26 @@
 import { Controller, Get } from '@nestjs/common';
 import { AppService } from './app.service';
-import { Public } from './common/decorators/public.decorator';
 
+/**
+ * V1 App Controller (No Auth)
+ *
+ * Provides basic endpoints without authentication.
+ * All routes are public in V1.
+ */
 @Controller()
 export class AppController {
   constructor(private readonly appService: AppService) {}
 
-  @Public()
   @Get()
   getHello(): string {
     return this.appService.getHello();
   }
 
-  @Public()
   @Get('health')
   getHealth(): { status: string; app: string } {
     return {
       status: 'ok',
-      app: 'Theo Platform API',
+      app: 'Theo Platform API V1',
     };
   }
 }
